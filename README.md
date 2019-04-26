@@ -3,5 +3,5 @@ Measuring traffic congestion and noise pollution with computer vision and noise 
 
 Contributors:
 
-Cyrus Blankinship
+Cyrus Blankinship<br/>
 Colin Bradley
