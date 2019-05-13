@@ -87,7 +87,7 @@ class ContourDetection(PipelineProcessor):
         image_dir - where to save images(must exist).        
     '''
 
-    def __init__(self, bg_subtractor, min_contour_width=15, min_contour_height=15, save_image=False, image_dir='images'):
+    def __init__(self, bg_subtractor, min_contour_width=20, min_contour_height=20, save_image=False, image_dir='images'):
         super(ContourDetection, self).__init__()
 
         self.bg_subtractor = bg_subtractor
@@ -97,19 +97,38 @@ class ContourDetection(PipelineProcessor):
         self.image_dir = image_dir
 
     def filter_mask(self, img, a=None):
+        
         '''
             This filters are hand-picked just based on visual tests
-        '''
+        '''               
+#         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1,1))
+        kernel2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (8,8))
+        kernel3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3))
+        
+        # Filter out road
+        SHAPE = (1500, 2000)
+        base = np.zeros(SHAPE + (3,), dtype='uint8')
+        FILTER_MASK = np.array([
+            [[940,1460],[620,400],[800,390],[1425,1420]]
+        ])
+        road_filters = cv2.fillPoly(base, FILTER_MASK, (255, 255, 255))[:, :, 0]
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        isolated = cv2.bitwise_or(img, img, mask=road_filters)
+        del road_filters
+        del FILTER_MASK
+        del base
+        closing = cv2.morphologyEx(isolated, cv2.MORPH_CLOSE, kernel)
+        opening = cv2.morphologyEx(closing, cv2.MORPH_OPEN, kernel2)
+        dilation = cv2.dilate(opening, kernel3, iterations=2)
+#         dilation[dilation < 240] = 0        
+#         # Fill any small holes
+#         closing = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
+#         # Remove noise
+#         opening = cv2.morphologyEx(closing, cv2.MORPH_OPEN, kernel)
 
-        # Fill any small holes
-        closing = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
-        # Remove noise
-        opening = cv2.morphologyEx(closing, cv2.MORPH_OPEN, kernel)
-
-        # Dilate to merge adjacent blobs
-        dilation = cv2.dilate(opening, kernel, iterations=2)
+#         # Dilate to merge adjacent blobs
+#         dilation = cv2.dilate(opening, kernel, iterations=2)
 
         return dilation
 
@@ -170,7 +189,6 @@ class VehicleCounter(PipelineProcessor):
         super(VehicleCounter, self).__init__()
 
         self.exit_masks = exit_masks
-
         self.vehicle_count = 0
         self.path_size = path_size
         self.pathes = []
@@ -197,6 +215,7 @@ class VehicleCounter(PipelineProcessor):
 
         points = np.array(objects)[:, 0:2]
         points = points.tolist()
+
 
         # add new points if pathes is empty
         if not self.pathes:
