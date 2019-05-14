@@ -58,7 +58,8 @@ class PipelineRunner(object):
         for p in self.pipeline:
             self.context = p(self.context)
 
-        self.log.debug("Frame #%d processed.", self.context['frame_number'])
+        if self.context['frame_number']%10==0:
+            self.log.debug("Frame #%d processed.", self.context['frame_number'])
 
         return self.context
 
@@ -87,7 +88,8 @@ class ContourDetection(PipelineProcessor):
         image_dir - where to save images(must exist).        
     '''
 
-    def __init__(self, bg_subtractor, min_contour_width=20, min_contour_height=20, save_image=False, image_dir='images'):
+    def __init__(self, bg_subtractor, min_contour_width=15, min_contour_height=15,
+                 save_image=False, image_dir='images'):
         super(ContourDetection, self).__init__()
 
         self.bg_subtractor = bg_subtractor
@@ -95,22 +97,24 @@ class ContourDetection(PipelineProcessor):
         self.min_contour_height = min_contour_height
         self.save_image = save_image
         self.image_dir = image_dir
+        # self.filter_masker = filter_masker
 
     def filter_mask(self, img, a=None):
-        
+
         '''
             This filters are hand-picked just based on visual tests
         '''               
 #         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1,1))
-        kernel2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (8,8))
-        kernel3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (1, 1))
+        kernel2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (8, 8))
+        kernel3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         
         # Filter out road
-        SHAPE = (1500, 2000)
+        SHAPE = (1124, 1500)
         base = np.zeros(SHAPE + (3,), dtype='uint8')
         FILTER_MASK = np.array([
-            [[940,1460],[620,400],[800,390],[1425,1420]]
+            [[840, 1124], [590, 290], [690, 290], [1280, 1124]]
+            # [[940, 1460], [620, 400], [800, 390], [1425, 1420]] # sample
         ])
         road_filters = cv2.fillPoly(base, FILTER_MASK, (255, 255, 255))[:, :, 0]
 
@@ -121,20 +125,14 @@ class ContourDetection(PipelineProcessor):
         closing = cv2.morphologyEx(isolated, cv2.MORPH_CLOSE, kernel)
         opening = cv2.morphologyEx(closing, cv2.MORPH_OPEN, kernel2)
         dilation = cv2.dilate(opening, kernel3, iterations=2)
-#         dilation[dilation < 240] = 0        
-#         # Fill any small holes
-#         closing = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
-#         # Remove noise
-#         opening = cv2.morphologyEx(closing, cv2.MORPH_OPEN, kernel)
-
-#         # Dilate to merge adjacent blobs
-#         dilation = cv2.dilate(opening, kernel, iterations=2)
+#
 
         return dilation
 
     def detect_vehicles(self, fg_mask, context):
 
         matches = []
+        contour_size = []
 
         # finding external contours
         im2, contours, hierarchy = cv2.findContours(
@@ -142,6 +140,7 @@ class ContourDetection(PipelineProcessor):
 
         for (i, contour) in enumerate(contours):
             (x, y, w, h) = cv2.boundingRect(contour)
+            counter_area = w*h
             contour_valid = (w >= self.min_contour_width) and (
                 h >= self.min_contour_height)
 
@@ -149,10 +148,10 @@ class ContourDetection(PipelineProcessor):
                 continue
 
             centroid = utils.get_centroid(x, y, w, h)
-
             matches.append(((x, y, w, h), centroid))
+            contour_size.append(counter_area)
 
-        return matches
+        return matches, contour_size
 
     def __call__(self, context):
         frame = context['frame'].copy()
@@ -160,14 +159,14 @@ class ContourDetection(PipelineProcessor):
 
         fg_mask = self.bg_subtractor.apply(frame, None, 0.001)
         # just thresholding values
-        fg_mask[fg_mask < 240] = 0
+        fg_mask[fg_mask < 180] = 0
         fg_mask = self.filter_mask(fg_mask, frame_number)
 
         if self.save_image:
             utils.save_frame(fg_mask, self.image_dir +
                              "/mask_%04d.png" % frame_number, flip=False)
 
-        context['objects'] = self.detect_vehicles(fg_mask, context)
+        context['objects'], context['contour_size'] = self.detect_vehicles(fg_mask, context)
         context['fg_mask'] = fg_mask
 
         return context
@@ -185,11 +184,12 @@ class VehicleCounter(PipelineProcessor):
         max_dst - max distance between two points.
     '''
 
-    def __init__(self, exit_masks=[], path_size=10, max_dst=30, x_weight=1.0, y_weight=1.0):
+    def __init__(self, exit_masks=[], path_size=4, max_dst=1000, x_weight=1.0, y_weight=2.0):
         super(VehicleCounter, self).__init__()
 
         self.exit_masks = exit_masks
         self.vehicle_count = 0
+        self.contour_size = 0
         self.path_size = path_size
         self.pathes = []
         self.max_dst = max_dst
@@ -207,9 +207,11 @@ class VehicleCounter(PipelineProcessor):
 
     def __call__(self, context):
         objects = context['objects']
+        contour_size = context['contour_size']
         context['exit_masks'] = self.exit_masks
         context['pathes'] = self.pathes
         context['vehicle_count'] = self.vehicle_count
+
         if not objects:
             return context
 
@@ -223,7 +225,7 @@ class VehicleCounter(PipelineProcessor):
                 self.pathes.append([match])
 
         else:
-            # link new points with old pathes based on minimum distance between
+            # link new points with old paths based on minimum distance between
             # points
             new_pathes = []
 
@@ -304,18 +306,19 @@ class VehicleCounter(PipelineProcessor):
         context['objects'] = objects
         context['vehicle_count'] = self.vehicle_count
 
-        self.log.debug('#VEHICLES FOUND: %s' % self.vehicle_count)
+        if context['frame_number'] % 10 == 0:
+            self.log.debug('#VEHICLES FOUND: %s' % self.vehicle_count)
 
         return context
 
 
 class CsvWriter(PipelineProcessor):
 
-    def __init__(self, path, name, start_time=0, fps=15):
+    def __init__(self, path, name, start_time=0, fps=1):
         super(CsvWriter, self).__init__()
 
         self.fp = open(os.path.join(path, name), 'w')
-        self.writer = csv.DictWriter(self.fp, fieldnames=['time', 'vehicles'])
+        self.writer = csv.DictWriter(self.fp, fieldnames=['time', 'vehicles', 'vehicle_size'])
         self.writer.writeheader()
         self.start_time = start_time
         self.fps = fps
@@ -326,13 +329,12 @@ class CsvWriter(PipelineProcessor):
     def __call__(self, context):
         frame_number = context['frame_number']
         count = _count = context['vehicle_count']
+        contour_size = context['contour_size']
 
         if self.prev:
             _count = count - self.prev
 
-        time = ((self.start_time + int(frame_number / self.fps)) * 100 
-                + int(100.0 / self.fps) * (frame_number % self.fps))
-        self.writer.writerow({'time': time, 'vehicles': _count})
+        self.writer.writerow({'time': frame_number, 'vehicles': _count, 'vehicle_size': contour_size})
         self.prev = count
 
         return context
@@ -396,6 +398,7 @@ class Visualizer(PipelineProcessor):
 
     def __call__(self, context):
         frame = context['frame'].copy()
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frame_number = context['frame_number']
         pathes = context['pathes']
         exit_masks = context['exit_masks']
