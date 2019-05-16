@@ -7,6 +7,8 @@ Measuring traffic congestion and noise pollution with computer vision and noise 
 
 [![Noon Observations](https://img.youtube.com/vi/zSfDVtpOQJc/0.jpg)](https://youtu.be/zSfDVtpOQJc)
 
+[![Evening Observations](https://img.youtube.com/vi/zIPD7dSXn7M/0.jpg)](https://youtu.be/zIPD7dSXn7M)
+
 This was made possible by following this [tutorial](https://medium.com/machine-learning-world/tutorial-making-road-traffic-counting-app-based-on-computer-vision-and-opencv-166937911660) from Andrey Nikishaev. 
 
 Contributors:
