@@ -113,7 +113,8 @@ class ContourDetection(PipelineProcessor):
         SHAPE = (1124, 1500)
         base = np.zeros(SHAPE + (3,), dtype='uint8')
         FILTER_MASK = np.array([
-            [[840, 1124], [590, 290], [690, 290], [1280, 1124]]
+            # [[840, 1124], [590, 290], [690, 290], [1280, 1124]]
+            [[810, 1124], [595, 300], [695, 300], [1250, 1124]]
             # [[940, 1460], [620, 400], [800, 390], [1425, 1420]] # sample
         ])
         road_filters = cv2.fillPoly(base, FILTER_MASK, (255, 255, 255))[:, :, 0]
